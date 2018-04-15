@@ -1,11 +1,21 @@
 import argparse
 import cv2
+import time
+import serial
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-v", "--video", help="path to the video file")
-ap.add_argument("-c", "--camera", help="camera index", required=False, type=int, default=1)
-ap.add_argument("-p", "--port", help="com port to communicate")
+ap.add_argument("-c", "--camera", help="camera index", required=False, type=int, default=0)
+ap.add_argument("-p", "--port", help="com port to communicate", default="/dev/rfcomm0")
 args = vars(ap.parse_args())
+
+ser = serial.Serial(
+	port=args["port"],
+	baudrate=9600
+)
+
+if not ser.isOpen():
+	ser.open()
 
 cIndex = args["camera"];
 
@@ -15,11 +25,13 @@ else:
 	camera = cv2.VideoCapture(args["video"])
 
 out_index=0
-blurx=30
-blury=140
+blurx=180
+blury=250
 
 blur1=5
 moving=0
+rotating=0;
+found=0
 
 
 # keep looping
@@ -33,7 +45,7 @@ while True:
 	# convert the frame to grayscale, blur it, and detect edges
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 	blurred = cv2.GaussianBlur(gray, (blur1, blur1), 0)
-	edged = cv2.Canny(blurred, blurx, blury)
+	edged = cv2.Canny(blurred, 35, 150)
 	edged_blur = edged.copy()
 	edged_blur = cv2.GaussianBlur(edged_blur, (3,3), 0)
 
@@ -44,6 +56,7 @@ while True:
 
 	out_frame = [frame,blurred,edged,edged_blur]
 
+	found=0
 	# loop over the contours
 	for c in cnts:
 		# approximate the contour
@@ -64,7 +77,7 @@ while True:
 
 			# compute whether or not the width and height, solidity, and
 			# aspect ratio of the contour falls within appropriate bounds
-			keepDims = w > 25 and h > 25
+			keepDims = w > blurx and h > blurx and w < blury and h < blury
 			keepSolidity = solidity > 0.9
 			keepAspectRatio = aspectRatio >= 0.8 and aspectRatio <= 1.2
 
@@ -74,8 +87,7 @@ while True:
 				# text
 				cv2.drawContours(out_frame[out_index], [approx], -1, (0, 0, 255), 4)
 				status = "Target(s) Acquired"
-				if not moving:
-
+				found=1
 
 				# compute the center of the contour region and draw the
 				# crosshairs
@@ -87,7 +99,16 @@ while True:
 				cv2.line(out_frame[out_index], (cX, startY), (cX, endY), (0, 0, 255), 3)
 
 	# draw the status text on the frame
-	cv2.putText(out_frame[out_index], status, (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+	if found and moving:
+		ser.write("S")
+		moving=0
+	if not found and rotating:
+		ser.write("S")
+		rotaing=0
+
+
+	
+	cv2.putText(out_frame[out_index], str(blurx)+" "+str(blury), (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
 		(0, 0, 255), 2)
 
 	# show the frame and record if a key is pressed
@@ -97,6 +118,19 @@ while True:
 	# if the 'q' key is pressed, stop the loop
 	if key == ord("q"):
 		break
+
+	if key == ord("s"):
+		ser.write("S")
+		moving=0
+		rotating=0
+
+	if key == ord("r"):
+		ser.write("U")
+		moving=1;
+
+	if key == ord("f"):
+		ser.write("R")
+		rotating=1	
 
 	if key == ord("m"):
 		out_index+=1
@@ -117,5 +151,6 @@ while True:
 		blur1+=1
 
 # cleanup the camera and close any open windows
+ser.close()
 camera.release()
 cv2.destroyAllWindows()
