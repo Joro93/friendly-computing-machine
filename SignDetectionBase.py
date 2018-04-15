@@ -1,18 +1,16 @@
-# USAGE
-# python drone.py --video FlightDemo.mp4
-
-# import the necessary packages
 import argparse
 import cv2
 
-# construct the argument parse and parse the arguments
 ap = argparse.ArgumentParser()
 ap.add_argument("-v", "--video", help="path to the video file")
+ap.add_argument("-c", "--camera", help="camera index", required=False, type=int, default=1)
+ap.add_argument("-p", "--port", help="com port to communicate")
 args = vars(ap.parse_args())
 
-# load the video
+cIndex = args["camera"];
+
 if not args.get("video", False):
-	camera = cv2.VideoCapture(1)
+	camera = cv2.VideoCapture(cIndex)
 else:
 	camera = cv2.VideoCapture(args["video"])
 
@@ -21,15 +19,14 @@ blurx=30
 blury=140
 
 blur1=5
+moving=0
+
 
 # keep looping
 while True:
-	# grab the current frame and initialize the status text
 	(grabbed, frame) = camera.read()
 	status = "No Targets"
-
-	# check to see if we have reached the end of the
-	# video
+	
 	if not grabbed:
 		break
 
@@ -77,6 +74,8 @@ while True:
 				# text
 				cv2.drawContours(out_frame[out_index], [approx], -1, (0, 0, 255), 4)
 				status = "Target(s) Acquired"
+				if not moving:
+
 
 				# compute the center of the contour region and draw the
 				# crosshairs
