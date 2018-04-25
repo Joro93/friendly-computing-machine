@@ -123,125 +123,144 @@ if not args.get("video", False):
 else:
 	camera = cv2.VideoCapture(args["video"])
 
-out_index=0
-blurx=220
-blury=290
 
-blur1=5
+# Coefficients
+
+out_index=0
+
+bigSquareMin=220
+bigSquareMax=300
+
+mediumSquareMin=180
+mediumSquareMax=219
+
+smallSquareMin=30
+smallSquareMax=80
+
+blurKernel1=5
+blurKernel2=3
+
+edgeMin=180
+edgeMax=280
+
+blackBoxMin = 180
+blackBoxMax = 220
+
+#states
 moving=0
 rotating=0;
 found=0
-
-edge1=180
-edge2=280
-
-tri1 = 50
-tri2 = 70
 
 left=-1
 
 
 while True:
 	(grabbed, frame) = camera.read()
-	status = "No Targets"
 	
 	if not grabbed:
 		break
 
-	# convert the frame to grayscale, blur it, and detect edges
 	gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-	blurred = cv2.GaussianBlur(gray, (blur1, blur1), 0)
-	#_, thresholded = cv2.threshold(gray,20,255,cv2.THRESH_BINARY)
-	edged = cv2.Canny(blurred, edge1, edge2)
+	blurred = cv2.GaussianBlur(gray, (blurKernel1, blurKernel1), 0)
+	_, thresholded = cv2.threshold(blurred,40,255,cv2.THRESH_BINARY)
+	(h,w) = thresholded.shape[:2];
+	thresholded = thresholded[3*h/5:5*h/6, 40:w-40]
+	edged = cv2.Canny(blurred, edgeMin, edgeMax)
 	edged_blur = edged.copy()
-	edged_blur = cv2.GaussianBlur(edged_blur, (3,3), 0)
+	edged_blur = cv2.GaussianBlur(edged_blur, (blurKernel2,blurKernel2), 0)
 	kernel = np.ones((5,5), np.uint8)
 	dilated = cv2.dilate(edged_blur, kernel, iterations=3)
 	img_erosion = cv2.erode(dilated, kernel, iterations=3)
 
-	#cnts = cv2.findContours(edged_blur.copy(), cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)[1]
+	thresholded_erosion = cv2.erode(thresholded,kernel,iterations=4)
+	thresholded_erosion = cv2.dilate(thresholded_erosion,kernel, iterations=6)
 
-	# find contours in the edge map
+	(_, cnts2, _) = cv2.findContours(cv2.bitwise_not(thresholded_erosion), cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
+
 	(_, cnts, _) = cv2.findContours(edged.copy(), cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_SIMPLE)
 
-	out_frame = [frame,edged,dilated, blurred]
+	out_frame = [frame,edged,thresholded, thresholded_erosion]
 
 	found=0
 	contoursCount=0
 	currentPos=0
+
+	for c in cnts2:
+		peri = cv2.arcLength(c, True)
+		approx = cv2.approxPolyDP(c, 0.01 * peri, True)
+		(x,y,w,h) = cv2.boundingRect(approx);
+		#cv2.drawContours(out_frame[out_index], [approx], -1, (0, 255, 255), 4)
+		currentPos = (x+w)/2.0;
+		print currentPos
+
+
 	# loop over the contours
 	for c in cnts:
 		# approximate the contour
 		peri = cv2.arcLength(c, True)
 		approx = cv2.approxPolyDP(c, 0.01 * peri, True)
 
-		if len(approx) == 4:
-			(x,y,w,h) = cv2.boundingRect(approx)
-			keepDims = w >= tri1 and w<= tri2 and h < tri2
-			if keepDims:
-				cv2.drawContours(out_frame[out_index], [approx], -1, (0, 0, 255), 4)
-				currentPos = (x+w)/2
-				print currentPos
+		#		currentPos = (x+w)/2
+		#		print currentPos
 
-		# ensure that the approximated contour is "roughly" rectangular
+		
 		if len(approx) >= 4 and len(approx) <= 6:
-			# compute the bounding box of the approximated contour and
-			# use the bounding box to compute the aspect ratio
 			(x, y, w, h) = cv2.boundingRect(approx)
 			aspectRatio = w / float(h)
-
-			# compute the solidity of the original contour
 			area = cv2.contourArea(c)
 			hullArea = cv2.contourArea(cv2.convexHull(c))
 			solidity = area / float(hullArea)
 
-			# compute whether or not the width and height, solidity, and
-			# aspect ratio of the contour falls within appropriate bounds
-			keepDims = w > blurx and h > blurx and w < blury and h < blury
-			keepSolidity = solidity > 0.9
-			keepAspectRatio = aspectRatio >= 0.85 and aspectRatio <= 1.15
+			keepDimsMedium = w > mediumSquareMin and h > mediumSquareMin and w < mediumSquareMax and h < mediumSquareMax
+			keepDimsBig = w > bigSquareMin and h > bigSquareMin and w < bigSquareMax and h < bigSquareMax
+			keepDimsSmall = w > smallSquareMin and h > smallSquareMin and w < smallSquareMax and h < smallSquareMax
 
-			# ensure that the contour passes all our tests
-			if keepDims and keepSolidity and keepAspectRatio:
-				# draw an outline around the target and update the status
-				# text
-				cv2.drawContours(out_frame[out_index], [approx], -1, (0, 0, 255), 4)
-				status = "Target(s) Acquired"
+			keepSolidity = solidity > 0.9
+			keepAspectRatio = aspectRatio > 0.88 and aspectRatio < 1.12
+
+			
+			if keepDimsMedium and keepSolidity and keepAspectRatio:
+				cv2.drawContours(out_frame[out_index], [approx], -1, (0, 255, 0), 4)
 				contoursCount+=1
-				found=1
+				foundMedium=1
 				out_frame[2] = four_point_transform(gray,approx.reshape(4,2))
 				rett, cleanImg = cv2.threshold(out_frame[2],80,255,cv2.THRESH_BINARY)
 				(h, w) = cleanImg.shape[:2]
-				out_frame[3]=cleanImg[15:h-15, 15:w-15]
+				out_frame[3]=cleanImg[10:h-10, 10:w-10]
+				left = classifyBasic(out_frame[3])
 				#out_frame[3]=cleanImg[0:h, w/2:w]
 				#out_frame[2]=cleanImg[0:h, 0:w/2]
-				# compute the center of the contour region and draw the
-				# crosshairs
-				M = cv2.moments(approx)
-				(cX, cY) = (int(M["m10"] / M["m00"]), int(M["m01"] / M["m00"]))
-				(startX, endX) = (int(cX - (w * 0.15)), int(cX + (w * 0.15)))
-				(startY, endY) = (int(cY - (h * 0.15)), int(cY + (h * 0.15)))
-				cv2.line(out_frame[out_index], (startX, cY), (endX, cY), (0, 0, 255), 3)
-				cv2.line(out_frame[out_index], (cX, startY), (cX, endY), (0, 0, 255), 3)
+			if keepDimsBig and keepSolidity and keepAspectRatio:
+				cv2.drawContours(out_frame[out_index], [approx], -1, (0, 0, 255), 4)
+				contoursCount+=1
+				found=1
 
 	# draw the status text on the frame
 	if found and moving:
 		ser.write("S")
 		moving=0
-		left = classifyBasic(out_frame[3])
+		#left = classifyBasic(out_frame[3])
+		if left == 0:
+			ser.write("R")
+			rotating=1
+		if left == 1:
+			ser.write("L")
+			rotating=1
+
 	if rotating:
 		#l,r = hough2(img_erosion,frame.copy())
 		
 		#if l or r:
 		#	ser.write("S")
 		#	rotating=0
-		if currentPos >195 and currentPos <208:
+		if currentPos >blackBoxMin and currentPos <blackBoxMax:
 			ser.write("S")
 			rotating=0
 
 
 	
-	cv2.putText(out_frame[out_index], str(contoursCount)+" left: "+str(left) + " edge Coeff "+str(tri1)+" "+str(tri2)+" "+str(csd), (20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
+	cv2.putText(out_frame[out_index], str(contoursCount)+" left: "+str(left) + " small square : "+ str(smallSquareMin) + ","  + str(smallSquareMax), 
+		(20, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.5,
 		(0, 0, 255), 2)
 
 	# show the frame and record if a key is pressed
@@ -295,19 +314,20 @@ while True:
 		out_index+=1
 		if out_index>=4:
 			out_index-=4
-	if key == ord("["):
-		tri1-=10
-	if key == ord("]"):
-		tri1+=10
-	if key == ord("'"):
-		tri2-=10
-	if key == ord("\\"):
-		tri2+=10
 
-	if key == ord(","):
-		asd-=1
-	if key == ord("."):
-		asd+=1
+	if key == ord("["):
+		smallSquareMin-=10
+	if key == ord("]"):
+		smallSquareMin+=10
+	if key == ord("'"):
+		smallSquareMax-=10
+	if key == ord("\\"):
+		smallSquareMax+=10
+
+	#if key == ord(","):
+	#	#asd-=1
+	#if key == ord("."):
+	#	#asd+=1
 
 # cleanup the camera and close any open windows
 #ser.close()
