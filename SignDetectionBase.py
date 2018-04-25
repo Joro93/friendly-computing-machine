@@ -66,7 +66,7 @@ def houghLines(edges,img):
 	edges_new = edges[6*h/8:7*h/8,0:w]
 	new_img = img[6*h/8:7*h/8,0:w]
 	(h,w) = edges_new.shape[:2]
- 	lines = cv2.HoughLinesP(edges_new, asd ,np.pi/180,10,minLineLength,bsd)
+	lines = cv2.HoughLinesP(edges_new, asd ,np.pi/180,10,minLineLength,bsd)
 	
 	if isinstance(lines,np.ndarray):
 		for x1,y1,x2,y2 in lines[0]:
